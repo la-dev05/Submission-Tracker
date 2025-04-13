@@ -5,8 +5,7 @@ struct submissionItem: Identifiable, Codable {
     let id: Int
     var description: String
     let dateAdded: Date
-    var displayNumber: Int  // For left side serial numbering
-    var sequenceNumber: Int? // For right side duplicate numbering
+    var sequenceNumber: Int? // For duplicate item numbering
     var isReceived: Bool = false
     
     static var nextId = 1
@@ -48,28 +47,29 @@ enum UIConstants {
 
 // MARK: - Views
 
-enum NavigationItem: String, Identifiable {
+enum NavigationItem: String, Hashable, Identifiable {
     case today = "Today's submission"
     case history = "History"
     case fullHistory = "View Full History"
-    case statistics = "Statistics"  // New case
+    case statistics = "Statistics"
+    case reminders = "Reminders"
     
-    var id: String { rawValue }
+    var id: String { self.rawValue }
     
     var icon: String {
         switch self {
         case .today: return "tshirt"
         case .history: return "calendar"
         case .fullHistory: return "list.bullet.rectangle"
-        case .statistics: return "chart.bar.fill"  // New icon
+        case .statistics: return "chart.bar.fill"
+        case .reminders: return "alarm.fill"
         }
     }
 }
 
-
-
 struct ContentView: View {
     @StateObject private var viewModel = submissionViewModel()
+    @StateObject private var reminderManager = ReminderManager()
     @State private var selection: NavigationItem? = .today
     
     var body: some View {
@@ -86,11 +86,15 @@ struct ContentView: View {
                 FullHistoryView()
             case .statistics:
                 StatisticsView()
+            case .reminders:
+                ReminderListView()
+                    .environmentObject(reminderManager)
             case .none:
                 Text("Select an option")
             }
         }
         .environmentObject(viewModel)
+        .environmentObject(reminderManager)
     }
 }
 

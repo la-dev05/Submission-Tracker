@@ -16,6 +16,9 @@ class submissionViewModel: ObservableObject {
         }
     }
     
+    var lastSubmittedItems: [submissionItem] = []
+    private var lastSubmissionDate: Date?
+    
     init() {
         loadHistory()
         cleanOldHistory()
@@ -57,40 +60,25 @@ class submissionViewModel: ObservableObject {
         try? encodedData.write(to: fileURL)
     }
 
-    private func updateDisplayNumbers() {
-        // Update sequential display numbers (left side)
-        for (index, _) in currentItems.enumerated() {
-            currentItems[index].displayNumber = index + 1
-        }
-        
-        // Update duplicate item numbers (right side)
+    private func updateSequenceNumbers(items: inout [submissionItem]) {
         var baseNumbers: [String: Int] = [:]
         
-        for (index, item) in currentItems.enumerated() {
-            let baseName = item.description.split(separator: " ").first?.description ?? item.description
-
-            // Use the current value before incrementing
-            let currentCount = baseNumbers[baseName] ?? 0
-            baseNumbers[baseName] = currentCount + 1
+        for index in items.indices {
+            let baseName = items[index].description.split(separator: " ").first?.description ?? items[index].description
+            let currentCount = (baseNumbers[baseName] ?? 0) + 1
+            baseNumbers[baseName] = currentCount
             
-            if currentCount > 0 {
-                // Assign the correct sequence number starting from 2
-                currentItems[index].sequenceNumber = currentCount + 1
-            } else {
-                currentItems[index].sequenceNumber = nil
-            }
+            items[index].sequenceNumber = currentCount > 1 ? currentCount : nil
         }
     }
-    
     
     func addItem(_ description: String) {
         let item = submissionItem(id: submissionItem.getNewId(),
                               description: description,
                               dateAdded: Date(),
-                              displayNumber: currentItems.count + 1,
                               sequenceNumber: nil)
         currentItems.append(item)
-        updateDisplayNumbers()
+        updateSequenceNumbers(items: &currentItems)
     }
     
     private func reindexAllHistoryItems() {
@@ -103,26 +91,11 @@ class submissionViewModel: ObservableObject {
         for date in sortedDates {
             var itemsForDate = history[date] ?? []
             
-            // Sort items by their current display number to maintain relative order
-            itemsForDate.sort { $0.displayNumber < $1.displayNumber }
-            
-            // Update display numbers
-            for index in itemsForDate.indices {
-                itemsForDate[index].displayNumber = index + 1
-            }
+            // Sort items by their id to maintain relative order
+            itemsForDate.sort(by: { $0.id < $1.id })
             
             // Update sequence numbers
-            var baseNumbers: [String: Int] = [:]
-            for index in itemsForDate.indices {
-                let baseName = itemsForDate[index].description.split(separator: " ").first?.description ?? itemsForDate[index].description
-                baseNumbers[baseName] = (baseNumbers[baseName] ?? 0) + 1
-                
-                if baseNumbers[baseName]! > 1 {
-                    itemsForDate[index].sequenceNumber = baseNumbers[baseName]
-                } else {
-                    itemsForDate[index].sequenceNumber = nil
-                }
-            }
+            updateSequenceNumbers(items: &itemsForDate)
             
             reindexedHistory[date] = itemsForDate
         }
@@ -132,47 +105,37 @@ class submissionViewModel: ObservableObject {
     }
     
     func markAsSubmitted() {
+        lastSubmittedItems = currentItems
+        lastSubmissionDate = Date()
+        
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: Date())
         
-        let existingItems = history[startOfDay] ?? []
-        var newItems = currentItems
+        var allItems = history[startOfDay] ?? []
+        allItems.append(contentsOf: currentItems)
+        updateSequenceNumbers(items: &allItems)
         
-        // Determine starting number for new items
-        let startNumber = existingItems.isEmpty ? 1 : existingItems.max(by: { $0.displayNumber < $1.displayNumber })?.displayNumber ?? 0 + 1
-        
-        // Update display numbers for new items
-        for (index, _) in newItems.enumerated() {
-            newItems[index].displayNumber = startNumber + index
-        }
-        
-        // Combine existing and new items
-        var allItems = existingItems
-        allItems.append(contentsOf: newItems)
-        
-        // Sort all items by display number to ensure correct order
-        allItems.sort { $0.displayNumber < $1.displayNumber }
-        
-        // Update sequence numbers for all items
-        var baseNumbers: [String: Int] = [:]
-        for index in allItems.indices {
-            let baseName = allItems[index].description.split(separator: " ").first?.description ?? allItems[index].description
-            baseNumbers[baseName] = (baseNumbers[baseName] ?? 0) + 1
-            
-            // Update sequence number
-            if baseNumbers[baseName]! > 1 {
-                allItems[index].sequenceNumber = baseNumbers[baseName]
-            } else {
-                allItems[index].sequenceNumber = nil
-            }
-        }
-        
-        // Save the updated items
         history[startOfDay] = allItems
         currentItems.removeAll()
+    }
+    
+    func undoLastSubmission() {
+        guard !lastSubmittedItems.isEmpty, let date = lastSubmissionDate else { return }
         
-        // Reindex all items after adding new ones
-        reindexAllHistoryItems()
+        // Remove items from history
+        for item in lastSubmittedItems {
+            removeHistoryItem(item, from: date)
+        }
+        
+        // Restore items to current items
+        currentItems.append(contentsOf: lastSubmittedItems)
+        
+        // Clear the undo buffer
+        lastSubmittedItems = []
+        lastSubmissionDate = nil
+        
+        // Save changes
+        saveHistory()
     }
     
     private func cleanOldHistory() {
@@ -197,9 +160,63 @@ class submissionViewModel: ObservableObject {
         submissionItem.nextId = 1
     }
     
+    private func renumberItems() {
+        // Get all items from both current and history
+        var allItems = currentItems
+        for items in history.values {
+            allItems.append(contentsOf: items)
+        }
+        
+        // Sort by ID to find gaps
+        allItems.sort(by: { $0.id < $1.id })
+        
+        // Create a mapping of old IDs to new IDs
+        var idMapping: [Int: Int] = [:]
+        var newId = 1
+        
+        for item in allItems {
+            idMapping[item.id] = newId
+            newId += 1
+        }
+        
+        // Update current items
+        for i in currentItems.indices {
+            let oldId = currentItems[i].id
+            currentItems[i] = submissionItem(
+                id: idMapping[oldId] ?? oldId,
+                description: currentItems[i].description,
+                dateAdded: currentItems[i].dateAdded,
+                sequenceNumber: currentItems[i].sequenceNumber,
+                isReceived: currentItems[i].isReceived
+            )
+        }
+        
+        // Update history items
+        var updatedHistory: [Date: [submissionItem]] = [:]
+        for (date, items) in history {
+            var updatedItems = items
+            for i in updatedItems.indices {
+                let oldId = updatedItems[i].id
+                updatedItems[i] = submissionItem(
+                    id: idMapping[oldId] ?? oldId,
+                    description: updatedItems[i].description,
+                    dateAdded: updatedItems[i].dateAdded,
+                    sequenceNumber: updatedItems[i].sequenceNumber,
+                    isReceived: updatedItems[i].isReceived
+                )
+            }
+            updatedHistory[date] = updatedItems
+        }
+        history = updatedHistory
+        
+        // Update the next ID counter
+        submissionItem.nextId = newId
+    }
+    
     func removeCurrentItem(_ item: submissionItem) {
         currentItems.removeAll { $0.id == item.id }
-        updateDisplayNumbers()
+        updateSequenceNumbers(items: &currentItems)
+        renumberItems()
     }
     
     private func updateHistoryNumbers(for date: Date) {
@@ -207,23 +224,8 @@ class submissionViewModel: ObservableObject {
         let startOfDay = calendar.startOfDay(for: date)
         
         if var items = history[startOfDay] {
-            // Update display numbers
-            for (index, _) in items.enumerated() {
-                items[index].displayNumber = index + 1
-            }
-            
             // Update sequence numbers
-            var baseNumbers: [String: Int] = [:]
-            for index in items.indices {
-                let baseName = items[index].description.split(separator: " ").first?.description ?? items[index].description
-                baseNumbers[baseName] = (baseNumbers[baseName] ?? 0) + 1
-                
-                if baseNumbers[baseName]! > 1 {
-                    items[index].sequenceNumber = baseNumbers[baseName]
-                } else {
-                    items[index].sequenceNumber = nil
-                }
-            }
+            updateSequenceNumbers(items: &items)
             
             history[startOfDay] = items
         }
@@ -237,29 +239,10 @@ class submissionViewModel: ObservableObject {
             if items.isEmpty {
                 history.removeValue(forKey: startOfDay)
             } else {
-                // Update display numbers sequentially
-                for (index, _) in items.enumerated() {
-                    items[index].displayNumber = index + 1
-                }
-                
-                // Update sequence numbers for duplicates
-                var baseNumbers: [String: Int] = [:]
-                for index in items.indices {
-                    let baseName = items[index].description.split(separator: " ").first?.description ?? items[index].description
-                    baseNumbers[baseName] = (baseNumbers[baseName] ?? 0) + 1
-                    
-                    if baseNumbers[baseName]! > 1 {
-                        items[index].sequenceNumber = baseNumbers[baseName]
-                    } else {
-                        items[index].sequenceNumber = nil
-                    }
-                }
-                
+                updateSequenceNumbers(items: &items)
                 history[startOfDay] = items
             }
-            
-            // Trigger reindexing of all history items to maintain consistency
-            reindexAllHistoryItems()
+            renumberItems()
         }
     }
 }

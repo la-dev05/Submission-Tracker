@@ -12,9 +12,11 @@ struct TodayView: View {
     @State private var newItemText = ""
     @State private var isKeyboardVisible = false
     @State private var keyboardHeight: CGFloat = 0
+    @State private var showingAddReminder = false
+    @State private var showingUndoAlert = false
     
     private func addNewItem() {
-        if !newItemText.isEmpty {
+        if (!newItemText.isEmpty) {
             withAnimation {
                 viewModel.addItem(newItemText)
                 newItemText = ""
@@ -25,9 +27,11 @@ struct TodayView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: UIConstants.padding) {
-                HStack {
-                    Button(action: { viewModel.markAsSubmitted() }) {
-                        Label("Mark as Submitted", systemImage: "checkmark.circle.fill")
+                HStack(spacing: 12) {
+                    Button(action: {
+                        viewModel.markAsSubmitted()
+                    }) {
+                        Label("Submit", systemImage: "checkmark.circle.fill")
                             .padding(.vertical, 16)
                             .frame(maxWidth: .infinity)
                             .background(UIConstants.primaryColor)
@@ -36,9 +40,23 @@ struct TodayView: View {
                             .shadow(radius: UIConstants.shadowRadius)
                             .font(.system(size: 18))
                     }
-                    .disabled(viewModel.currentItems.isEmpty)
-                    .opacity(viewModel.currentItems.isEmpty ? 0.6 : 1)
+                    
+                    Button(action: {
+                        viewModel.markAsSubmitted()
+                        showingAddReminder = true
+                    }) {
+                        Label("+ Remind", systemImage: "bell.fill")
+                            .padding(.vertical, 16)
+                            .frame(maxWidth: .infinity)
+                            .background(.red)
+                            .foregroundColor(.white)
+                            .cornerRadius(UIConstants.cornerRadius)
+                            .shadow(radius: UIConstants.shadowRadius)
+                            .font(.system(size: 18))
+                    }
                 }
+                .disabled(viewModel.currentItems.isEmpty)
+                .opacity(viewModel.currentItems.isEmpty ? 0.6 : 1)
                 .padding(.horizontal)
                 
                 HStack {
@@ -74,7 +92,7 @@ struct TodayView: View {
                     List {
                         ForEach(viewModel.currentItems) { item in
                             HStack(spacing: 15) {
-                                Text("#\(item.displayNumber)")
+                                Text("#\(item.id)")
                                     .foregroundColor(UIConstants.primaryColor)
                                     .font(.system(.body, design: .rounded))
                                     .frame(width: 30, alignment: .leading)
@@ -106,7 +124,8 @@ struct TodayView: View {
                 }
                 
                 if !isKeyboardVisible {
-                    Spacer().frame(height: 200)
+                    Spacer(minLength: 0)
+                        .frame(height: 100) // Reduced height to account for QuickAddItemsView
                 }
             }
             
@@ -114,6 +133,9 @@ struct TodayView: View {
                 QuickAddItemsView()
                     .transition(.move(edge: .bottom))
             }
+        }
+        .sheet(isPresented: $showingAddReminder) {
+            AddReminderView()
         }
         .navigationTitle("Today's submission")
         .onAppear {
@@ -127,6 +149,24 @@ struct TodayView: View {
                 isKeyboardVisible = false
                 keyboardHeight = 0
             }
+            NotificationCenter.default.addObserver(
+                forName: UIDevice.deviceDidShakeNotification,
+                object: nil,
+                queue: .main) { _ in
+                    if !viewModel.lastSubmittedItems.isEmpty {
+                        showingUndoAlert = true
+                    }
+            }
+        }
+        .alert("Undo Last Submission?", isPresented: $showingUndoAlert) {
+            Button("Undo", role: .destructive) {
+                withAnimation {
+                    viewModel.undoLastSubmission()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will restore the last submitted items back to Today's submission.")
         }
         .animation(.spring(), value: isKeyboardVisible)
     }

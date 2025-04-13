@@ -13,7 +13,7 @@ struct SidebarView: View {
     
     var body: some View {
         List(selection: $selection) {
-            ForEach([NavigationItem.today, NavigationItem.history, NavigationItem.statistics]) { item in
+            ForEach([NavigationItem.today, NavigationItem.history, NavigationItem.statistics, NavigationItem.reminders]) { item in
                 NavigationLink(value: item) {
                     Label(item.rawValue, systemImage: item.icon)
                 }
