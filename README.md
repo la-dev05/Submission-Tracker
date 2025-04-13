@@ -49,7 +49,7 @@ A **SwiftUI-based iOS application** designed for tracking submitted items with a
 
 ## 📄 License
 
-© 2025 Lakshya. All rights reserved.  
+© 2025 Lakshya G. | All rights reserved.  
 Unauthorized copying, distribution, or modification of any part of this project is strictly prohibited without prior written consent.
 
 For inquiries, contact: **lakshya.gupta.ug24@plaksha.edu.in**
